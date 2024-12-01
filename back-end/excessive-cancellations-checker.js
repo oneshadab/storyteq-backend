@@ -95,7 +95,14 @@ export class ExcessiveCancellationsChecker {
      * @returns {boolean}
      */
     hasExcessiveCancelling(trades) {
+        trades.sort((a, b) =>
+            a.timestamp.getTime() === b.timestamp.getTime()
+                ? b.orderType.localeCompare(a.orderType)
+                : a.timestamp.getTime() - b.timestamp.getTime()
+        );
+        const maxTimeDiff = 60 * 1000;
         let windowStart = 0;
+
         let totalOrders = 0;
         let totalCancels = 0;
 
@@ -109,10 +116,9 @@ export class ExcessiveCancellationsChecker {
 
             // Remove trades outside 60-second window
             while (
-                windowStart <= i &&
-                trades[i].timestamp.getTime() -
-                    trades[windowStart].timestamp.getTime() >
-                    60000
+                windowStart < i &&
+                trades[i].timestamp.getTime() - trades[windowStart].timestamp.getTime() >
+                    maxTimeDiff
             ) {
                 if (trades[windowStart].orderType === 'D') {
                     totalOrders -= trades[windowStart].quantity;
@@ -122,8 +128,18 @@ export class ExcessiveCancellationsChecker {
                 windowStart++;
             }
 
-            // Check if there are any orders and if cancel ratio exceeds 1/3
-            if (totalCancels > 0 && totalCancels / (totalOrders + totalCancels) > 1 / 3) {
+            if (
+                (i === trades.length - 1 ||
+                    trades[i + 1].timestamp.getTime() - trades[windowStart].timestamp.getTime() >
+                        maxTimeDiff) &&
+                totalCancels > 0 &&
+                // totalOrders > 0 &&
+                totalCancels / (totalOrders + totalCancels) > 1 / 3
+            ) {
+                console.log(
+                    `${trades[i].company} has excessive cancelling, ${totalCancels} cancels, ${totalOrders} orders`,
+                    `window times: ${trades[windowStart].timestamp} - ${trades[i].timestamp}`
+                );
                 return true;
             }
         }
