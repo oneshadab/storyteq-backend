@@ -1,3 +1,6 @@
+const fs = require('fs');
+const readline = require('readline');
+
 const Trade = require('./entities/trade');
 const TradeParser = require('./helpers/trade-parser');
 
@@ -19,7 +22,7 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<string[]>}
      */
     async companiesInvolvedInExcessiveCancellations() {
-        const trades = await new TradeParser(this.filePath).parseTradeFile();
+        const trades = await this.getTrades();
 
         const tradesByCompany = trades.reduce((groups, trade) => {
             (groups[trade.company] ??= []).push(trade);
@@ -37,11 +40,48 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<number>}
      */
     async totalNumberOfWellBehavedCompanies() {
-        const trades = await new TradeParser(this.filePath).parseTradeFile();
+        const trades = await this.getTrades();
         const uniqueCompanies = new Set(trades.map((trade) => trade.company));
         const excessiveCompanies = await this.companiesInvolvedInExcessiveCancellations();
 
         return uniqueCompanies.size - excessiveCompanies.length;
+    }
+
+    async getTrades() {
+        const trades = [];
+        for await (const trade of this.getTradeReader()) {
+            trades.push(trade);
+        }
+        return trades;
+    }
+
+    getTradeReader() {
+        const parser = new TradeParser(this.filePath);
+        const lineReader = readline.createInterface({
+            input: fs.createReadStream(this.filePath),
+            crlfDelay: Infinity,
+        });
+
+        const reader = async function* () {
+            for await (const line of lineReader) {
+                let trade;
+
+                try {
+                    trade = parser.parseTrade(line);
+                } catch (error) {
+                    if (error instanceof TradeParser.ParseError) {
+                        // Ignore invalid lines
+                        continue;
+                    } else {
+                        throw error;
+                    }
+                }
+
+                yield trade;
+            }
+        };
+
+        return reader();
     }
 
     /**
@@ -117,8 +157,7 @@ export class ExcessiveCancellationsChecker {
             // Remove trades outside 60-second window
             while (
                 windowStart < i &&
-                trades[i].timestamp.getTime() - trades[windowStart].timestamp.getTime() >
-                    maxTimeDiff
+                trades[i].timestamp.getTime() - trades[windowStart].timestamp.getTime() > maxTimeDiff
             ) {
                 if (trades[windowStart].orderType === 'D') {
                     totalOrders -= trades[windowStart].quantity;
@@ -128,18 +167,13 @@ export class ExcessiveCancellationsChecker {
                 windowStart++;
             }
 
-            if (
-                (i === trades.length - 1 ||
-                    trades[i + 1].timestamp.getTime() - trades[windowStart].timestamp.getTime() >
-                        maxTimeDiff) &&
-                totalCancels > 0 &&
-                // totalOrders > 0 &&
-                totalCancels / (totalOrders + totalCancels) > 1 / 3
-            ) {
-                console.log(
-                    `${trades[i].company} has excessive cancelling, ${totalCancels} cancels, ${totalOrders} orders`,
-                    `window times: ${trades[windowStart].timestamp} - ${trades[i].timestamp}`
-                );
+            const isWindowComplete =
+                i === trades.length - 1 ||
+                trades[i + 1].timestamp.getTime() - trades[windowStart].timestamp.getTime() > maxTimeDiff;
+
+            const hasUnbalancedRatio = totalCancels > 0 && totalCancels / (totalOrders + totalCancels) > 1 / 3;
+
+            if (isWindowComplete && hasUnbalancedRatio) {
                 return true;
             }
         }
