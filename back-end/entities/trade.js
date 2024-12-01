@@ -1,4 +1,4 @@
-class Trade {
+export class Trade {
     /**
      * @param {Date} timestamp
      * @param {string} company
@@ -12,5 +12,3 @@ class Trade {
         this.quantity = quantity;
     }
 }
-
-module.exports = Trade;

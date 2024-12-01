@@ -1,8 +1,8 @@
-const fs = require('fs');
-const readline = require('readline');
+import fs from 'fs';
+import readline from 'readline';
 
-const Trade = require('./entities/trade');
-const TradeParser = require('./helpers/trade-parser');
+import { Trade } from './entities/trade.js';
+import { TradeParser, ParseError } from './helpers/trade-parser.js';
 
 export class ExcessiveCancellationsChecker {
     /**
@@ -49,39 +49,35 @@ export class ExcessiveCancellationsChecker {
 
     async getTrades() {
         const trades = [];
-        for await (const trade of this.getTradeReader()) {
+        for await (const trade of this.getTradeStream()) {
             trades.push(trade);
         }
         return trades;
     }
 
-    getTradeReader() {
+    getTradeStream() {
         const parser = new TradeParser(this.filePath);
-        const lineReader = readline.createInterface({
+        const lineStream = readline.createInterface({
             input: fs.createReadStream(this.filePath),
             crlfDelay: Infinity,
         });
 
-        const reader = async function* () {
-            for await (const line of lineReader) {
-                let trade;
-
+        const createStream = async function* () {
+            for await (const line of lineStream) {
                 try {
-                    trade = parser.parseTrade(line);
+                    const trade = parser.parseTrade(line);
+                    yield trade;
                 } catch (error) {
-                    if (error instanceof TradeParser.ParseError) {
+                    if (error instanceof ParseError) {
                         // Ignore invalid lines
                         continue;
-                    } else {
-                        throw error;
                     }
+                    throw error;
                 }
-
-                yield trade;
             }
         };
 
-        return reader();
+        return createStream();
     }
 
     /**
@@ -135,50 +131,35 @@ export class ExcessiveCancellationsChecker {
      * @returns {boolean}
      */
     hasExcessiveCancelling(trades) {
-        trades.sort((a, b) =>
-            a.timestamp.getTime() === b.timestamp.getTime()
-                ? b.orderType.localeCompare(a.orderType)
-                : a.timestamp.getTime() - b.timestamp.getTime()
-        );
         const maxTimeDiff = 60 * 1000;
-        let windowStart = 0;
+        const cancellationRatioThreshold = 1 / 3;
 
-        let totalOrders = 0;
-        let totalCancels = 0;
+        const totals = {
+            D: 0,
+            F: 0,
 
-        for (let i = 0; i < trades.length; i++) {
-            // Add new trade to window
-            if (trades[i].orderType === 'D') {
-                totalOrders += trades[i].quantity;
-            } else {
-                totalCancels += trades[i].quantity;
-            }
+            get cancellationRatio() {
+                return this.F / (this.D + this.F);
+            },
+        };
 
-            // Remove trades outside 60-second window
-            while (
-                windowStart < i &&
-                trades[i].timestamp.getTime() - trades[windowStart].timestamp.getTime() > maxTimeDiff
-            ) {
-                if (trades[windowStart].orderType === 'D') {
-                    totalOrders -= trades[windowStart].quantity;
-                } else {
-                    totalCancels -= trades[windowStart].quantity;
+        const batch = [];
+
+        for (const trade of trades) {
+            while (batch.length > 0 && trade.timestamp.getTime() - batch[0].timestamp.getTime() > maxTimeDiff) {
+                const oldTrade = batch.shift();
+                totals[oldTrade.orderType] -= oldTrade.quantity;
+
+                if (totals.cancellationRatio > cancellationRatioThreshold) {
+                    return true;
                 }
-                windowStart++;
             }
 
-            const isWindowComplete =
-                i === trades.length - 1 ||
-                trades[i + 1].timestamp.getTime() - trades[windowStart].timestamp.getTime() > maxTimeDiff;
-
-            const hasUnbalancedRatio = totalCancels > 0 && totalCancels / (totalOrders + totalCancels) > 1 / 3;
-
-            if (isWindowComplete && hasUnbalancedRatio) {
-                return true;
-            }
+            totals[trade.orderType] += trade.quantity;
+            batch.push(trade);
         }
 
-        return false;
+        return totals.cancellationRatio > cancellationRatioThreshold;
     }
 }
 
