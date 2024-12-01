@@ -1,5 +1,5 @@
-const fs = require('fs');
-const readline = require('readline');
+const Trade = require('./entities/trade');
+const TradeParser = require('./helpers/trade-parser');
 
 export class ExcessiveCancellationsChecker {
     /**
@@ -19,21 +19,15 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<string[]>}
      */
     async companiesInvolvedInExcessiveCancellations() {
-        const trades = await this.parseTradeFile();
-        const companiesMap = new Map();
+        const trades = await new TradeParser(this.filePath).parseTradeFile();
 
-        // Group trades by company
-        trades.forEach((trade) => {
-            if (!companiesMap.has(trade.company)) {
-                companiesMap.set(trade.company, []);
-            }
-            companiesMap.get(trade.company).push(trade);
-        });
+        const tradesByCompany = trades.reduce((groups, trade) => {
+            (groups[trade.company] ??= []).push(trade);
+            return groups;
+        }, {});
 
-        // Check each company for excessive cancellations
-        return Array.from(companiesMap)
-            .filter(([company, trades]) => this.isExcessiveCancelling(trades))
-            .map(([company]) => company);
+        const companies = Object.keys(tradesByCompany);
+        return companies.filter((company) => this.hasExcessiveCancelling(tradesByCompany[company]));
     }
 
     /**
@@ -43,10 +37,9 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<number>}
      */
     async totalNumberOfWellBehavedCompanies() {
-        const trades = await this.parseTradeFile();
+        const trades = await new TradeParser(this.filePath).parseTradeFile();
         const uniqueCompanies = new Set(trades.map((trade) => trade.company));
-        const excessiveCompanies =
-            await this.companiesInvolvedInExcessiveCancellations();
+        const excessiveCompanies = await this.companiesInvolvedInExcessiveCancellations();
 
         return uniqueCompanies.size - excessiveCompanies.length;
     }
@@ -101,41 +94,36 @@ export class ExcessiveCancellationsChecker {
      * @param {Trade[]} trades
      * @returns {boolean}
      */
-    isExcessiveCancelling(trades) {
-        trades.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
+    hasExcessiveCancelling(trades) {
         let windowStart = 0;
-        let newOrdersQty = 0;
-        let cancelsQty = 0;
+        let totalOrders = 0;
+        let totalCancels = 0;
 
         for (let i = 0; i < trades.length; i++) {
             // Add new trade to window
             if (trades[i].orderType === 'D') {
-                newOrdersQty += trades[i].quantity;
+                totalOrders += trades[i].quantity;
             } else {
-                cancelsQty += trades[i].quantity;
+                totalCancels += trades[i].quantity;
             }
 
             // Remove trades outside 60-second window
             while (
                 windowStart <= i &&
                 trades[i].timestamp.getTime() -
-                trades[windowStart].timestamp.getTime() >
-                60000
+                    trades[windowStart].timestamp.getTime() >
+                    60000
             ) {
                 if (trades[windowStart].orderType === 'D') {
-                    newOrdersQty -= trades[windowStart].quantity;
+                    totalOrders -= trades[windowStart].quantity;
                 } else {
-                    cancelsQty -= trades[windowStart].quantity;
+                    totalCancels -= trades[windowStart].quantity;
                 }
                 windowStart++;
             }
 
             // Check if there are any orders and if cancel ratio exceeds 1/3
-            if (
-                newOrdersQty > 0 &&
-                cancelsQty / (newOrdersQty + cancelsQty) > 1 / 3
-            ) {
+            if (totalCancels > 0 && totalCancels / (totalOrders + totalCancels) > 1 / 3) {
                 return true;
             }
         }
@@ -144,17 +132,3 @@ export class ExcessiveCancellationsChecker {
     }
 }
 
-class Trade {
-    /**
-     * @param {Date} timestamp
-     * @param {string} company
-     * @param {string} orderType
-     * @param {number} quantity
-     */
-    constructor(timestamp, company, orderType, quantity) {
-        this.timestamp = timestamp;
-        this.company = company;
-        this.orderType = orderType;
-        this.quantity = quantity;
-    }
-}
