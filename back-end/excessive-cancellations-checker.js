@@ -3,6 +3,7 @@ import readline from 'readline';
 
 import { Trade } from './entities/trade.js';
 import { TradeParser, ParseError } from './helpers/trade-parser.js';
+import { RangeChecker } from './helpers/range-checker.js';
 
 export class ExcessiveCancellationsChecker {
     /**
@@ -54,27 +55,27 @@ export class ExcessiveCancellationsChecker {
      * @param {Trade} trade
      */
     process(trade) {
-        const processor = this.getOrCreateProcessor(trade.company);
+        const checker = this.getOrCreateChecker(trade.company);
 
-        while (processor.isOutsideTimeRange(trade)) {
-            processor.checkForExcessiveCancelling();
-            processor.removeOldest();
+        while (checker.isOutsideTimeRange(trade)) {
+            checker.checkForExcessiveCancelling();
+            checker.removeOldest();
         }
 
-        processor.add(trade);
+        checker.add(trade);
     }
 
     /**
      * @param {string} company
-     * @returns {Checker}
+     * @returns {RangeChecker}
      */
-    getOrCreateProcessor(company) {
+    getOrCreateChecker(company) {
         const timeRange = 60 * 1000;
         const cancellationRatioThreshold = 1 / 3;
 
         if (!this.checkers.has(company)) {
             // Each company should have a single checker
-            this.checkers.set(company, new Checker(timeRange, cancellationRatioThreshold));
+            this.checkers.set(company, new RangeChecker(timeRange, cancellationRatioThreshold));
         }
 
         return this.checkers.get(company);
@@ -120,80 +121,5 @@ export class ExcessiveCancellationsChecker {
      */
     get excessiveCancelledCompanies() {
         return this.companies.filter((company) => this.checkers.get(company).checkForExcessiveCancelling());
-    }
-}
-
-/**
- * Checker to hold the state while processing trades for a single company.
- *
- * SIDE NOTE: Naming things is quite difficult
- */
-class Checker {
-    constructor(timeRange, cancellationRatioThreshold) {
-        this.timeRange = timeRange;
-        this.cancellationRatioThreshold = cancellationRatioThreshold;
-
-        this.trades = [];
-        this.total = {
-            D: 0,
-            F: 0,
-        };
-        this.checkFailed = false;
-    }
-
-    /**
-     * @param {Trade} trade
-     */
-    add(trade) {
-        this.total[trade.orderType] += trade.quantity;
-        this.trades.push(trade);
-    }
-
-    removeOldest() {
-        this.total[this.oldest.orderType] -= this.oldest.quantity;
-        this.trades.shift();
-    }
-
-    /**
-     * @param {Trade} trade
-     * @returns {boolean}
-     */
-    isOutsideTimeRange(trade) {
-        return this.oldest && trade.timestamp.getTime() - this.oldest.timestamp.getTime() > this.timeRange;
-    }
-
-    /**
-     * @returns {boolean}
-     */
-    checkForExcessiveCancelling() {
-        return (this.checkFailed ||= this.cancellationRatio > this.cancellationRatioThreshold);
-    }
-
-    /**
-     * @returns {Trade|undefined}
-     */
-    get oldest() {
-        return this.trades[0];
-    }
-
-    /**
-     * @returns {number}
-     */
-    get totalCancelled() {
-        return this.total.F;
-    }
-
-    /**
-     * @returns {number}
-     */
-    get totalNew() {
-        return this.total.D;
-    }
-
-    /**
-     * @returns {number}
-     */
-    get cancellationRatio() {
-        return this.totalCancelled / (this.totalNew + this.totalCancelled);
     }
 }
