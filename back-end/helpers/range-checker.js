@@ -1,10 +1,5 @@
 import { Trade } from '../entities/trade.js';
 
-/**
- * Checker to hold the state while processing trades for a single company.
- *
- * SIDE NOTE: Naming things is quite difficult
- */
 export class RangeChecker {
     constructor(timeRange, cancellationRatioThreshold) {
         this.timeRange = timeRange;

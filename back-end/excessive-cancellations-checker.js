@@ -51,6 +51,7 @@ export class ExcessiveCancellationsChecker {
         this.reset();
 
         for await (const trade of this.readTrades()) {
+            // Process immediately without storing in memory
             this.process(trade);
         }
     }
