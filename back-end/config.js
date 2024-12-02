@@ -1,0 +1,2 @@
+export const DEFAULT_TIME_RANGE = 60 * 1000;
+export const DEFAULT_CANCELLATION_RATIO_THRESHOLD = 1 / 3;

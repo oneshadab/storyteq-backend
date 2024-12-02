@@ -4,6 +4,7 @@ import readline from 'readline';
 import { Trade } from './entities/trade.js';
 import { TradeParser, ParseError } from './helpers/trade-parser.js';
 import { RangeChecker } from './helpers/range-checker.js';
+import * as config from './config.js';
 
 export class ExcessiveCancellationsChecker {
     /**
@@ -11,10 +12,13 @@ export class ExcessiveCancellationsChecker {
      * you have to use it in your methods to solve the task
      *
      * @param {string} filePath
+     * @param {number|undefined} timeRange
+     * @param {number|undefined} cancellationRatioThreshold
      */
-    constructor(filePath) {
+    constructor(filePath, timeRange, cancellationRatioThreshold) {
         this.filePath = filePath;
-        this.checkers = new Map();
+        this.timeRange = timeRange ?? config.DEFAULT_TIME_RANGE;
+        this.cancellationRatioThreshold = cancellationRatioThreshold ?? config.DEFAULT_CANCELLATION_RATIO_THRESHOLD;
     }
 
     /**
@@ -70,12 +74,9 @@ export class ExcessiveCancellationsChecker {
      * @returns {RangeChecker}
      */
     getOrCreateChecker(company) {
-        const timeRange = 60 * 1000;
-        const cancellationRatioThreshold = 1 / 3;
-
         if (!this.checkers.has(company)) {
             // Each company should have a single checker
-            this.checkers.set(company, new RangeChecker(timeRange, cancellationRatioThreshold));
+            this.checkers.set(company, new RangeChecker(this.timeRange, this.cancellationRatioThreshold));
         }
 
         return this.checkers.get(company);
