@@ -9,7 +9,7 @@ export class ExcessiveCancellationsChecker {
      * We provide a path to a file when initiating the class
      * you have to use it in your methods to solve the task
      *
-     * @param {string} filePath - The path to the trade file.
+     * @param {string} filePath
      */
     constructor(filePath) {
         this.filePath = filePath;
@@ -51,18 +51,10 @@ export class ExcessiveCancellationsChecker {
     }
 
     /**
-     * @param {Trade} trade - The trade object to process.
+     * @param {Trade} trade
      */
     process(trade) {
-        const timeRange = 60 * 1000;
-        const cancellationRatioThreshold = 1 / 3;
-
-        if (!this.processors.has(trade.company)) {
-            // Each company should have a single processor
-            this.processors.set(trade.company, new Processor(timeRange, cancellationRatioThreshold));
-        }
-
-        const processor = this.processors.get(trade.company);
+        const processor = this.getOrCreateProcessor(trade.company);
 
         while (processor.isOutsideTimeRange(trade)) {
             processor.checkForExcessiveCancelling();
@@ -72,6 +64,25 @@ export class ExcessiveCancellationsChecker {
         processor.add(trade);
     }
 
+    /**
+     * @param {string} company
+     * @returns {Processor}
+     */
+    getOrCreateProcessor(company) {
+        const timeRange = 60 * 1000;
+        const cancellationRatioThreshold = 1 / 3;
+
+        if (!this.processors.has(company)) {
+            // Each company should have a single processor
+            this.processors.set(company, new Processor(timeRange, cancellationRatioThreshold));
+        }
+
+        return this.processors.get(company);
+    }
+
+    /**
+     * @returns {AsyncIterable<Trade>}
+     */
     readTrades() {
         const parser = new TradeParser(this.filePath);
         const lineStream = readline.createInterface({
@@ -97,10 +108,16 @@ export class ExcessiveCancellationsChecker {
         return createStream();
     }
 
+    /**
+     * @returns {string[]}
+     */
     get companies() {
         return Array.from(this.processors.keys());
     }
 
+    /**
+     * @returns {string[]}
+     */
     get excessiveCancelledCompanies() {
         return this.companies.filter((company) => this.processors.get(company).checkForExcessiveCancelling());
     }
@@ -108,7 +125,7 @@ export class ExcessiveCancellationsChecker {
 
 /**
  * Processor to hold the state while processing trades for a single company.
- * 
+ *
  * SIDE NOTE: Naming things is quite difficult
  */
 class Processor {
@@ -124,6 +141,9 @@ class Processor {
         this.checkFailed = false;
     }
 
+    /**
+     * @param {Trade} trade
+     */
     add(trade) {
         this.total[trade.orderType] += trade.quantity;
         this.trades.push(trade);
@@ -134,26 +154,45 @@ class Processor {
         this.trades.shift();
     }
 
+    /**
+     * @param {Trade} trade
+     * @returns {boolean}
+     */
     isOutsideTimeRange(trade) {
         return this.oldest && trade.timestamp.getTime() - this.oldest.timestamp.getTime() > this.timeRange;
     }
 
+    /**
+     * @returns {boolean}
+     */
     checkForExcessiveCancelling() {
         return (this.checkFailed ||= this.cancellationRatio > this.cancellationRatioThreshold);
     }
 
+    /**
+     * @returns {Trade|undefined}
+     */
     get oldest() {
         return this.trades[0];
     }
 
+    /**
+     * @returns {number}
+     */
     get totalCancelled() {
         return this.total.F;
     }
 
+    /**
+     * @returns {number}
+     */
     get totalNew() {
         return this.total.D;
     }
 
+    /**
+     * @returns {number}
+     */
     get cancellationRatio() {
         return this.totalCancelled / (this.totalNew + this.totalCancelled);
     }

@@ -3,12 +3,14 @@ import { Trade } from '../entities/trade.js';
 export class ParseError extends Error {}
 
 export class TradeParser {
+    /**
+     * @param {string} filePath
+     */
     constructor(filePath) {
         this.filePath = filePath;
     }
 
     /**
-     * Parses a single line of the trade file and returns a trade object.
      * @param {string} line
      * @returns {Trade}
      */
