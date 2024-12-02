@@ -13,7 +13,7 @@ export class ExcessiveCancellationsChecker {
      */
     constructor(filePath) {
         this.filePath = filePath;
-        this.processors = new Map();
+        this.checkers = new Map();
     }
 
     /**
@@ -39,7 +39,7 @@ export class ExcessiveCancellationsChecker {
     }
 
     reset() {
-        this.processors = new Map();
+        this.checkers = new Map();
     }
 
     async processTradeFile() {
@@ -66,18 +66,18 @@ export class ExcessiveCancellationsChecker {
 
     /**
      * @param {string} company
-     * @returns {Processor}
+     * @returns {Checker}
      */
     getOrCreateProcessor(company) {
         const timeRange = 60 * 1000;
         const cancellationRatioThreshold = 1 / 3;
 
-        if (!this.processors.has(company)) {
-            // Each company should have a single processor
-            this.processors.set(company, new Processor(timeRange, cancellationRatioThreshold));
+        if (!this.checkers.has(company)) {
+            // Each company should have a single checker
+            this.checkers.set(company, new Checker(timeRange, cancellationRatioThreshold));
         }
 
-        return this.processors.get(company);
+        return this.checkers.get(company);
     }
 
     /**
@@ -112,23 +112,23 @@ export class ExcessiveCancellationsChecker {
      * @returns {string[]}
      */
     get companies() {
-        return Array.from(this.processors.keys());
+        return Array.from(this.checkers.keys());
     }
 
     /**
      * @returns {string[]}
      */
     get excessiveCancelledCompanies() {
-        return this.companies.filter((company) => this.processors.get(company).checkForExcessiveCancelling());
+        return this.companies.filter((company) => this.checkers.get(company).checkForExcessiveCancelling());
     }
 }
 
 /**
- * Processor to hold the state while processing trades for a single company.
+ * Checker to hold the state while processing trades for a single company.
  *
  * SIDE NOTE: Naming things is quite difficult
  */
-class Processor {
+class Checker {
     constructor(timeRange, cancellationRatioThreshold) {
         this.timeRange = timeRange;
         this.cancellationRatioThreshold = cancellationRatioThreshold;
