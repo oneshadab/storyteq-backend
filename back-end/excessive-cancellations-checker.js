@@ -131,35 +131,70 @@ export class ExcessiveCancellationsChecker {
      * @returns {boolean}
      */
     hasExcessiveCancelling(trades) {
-        const maxTimeDiff = 60 * 1000;
+        const timeRange = 60 * 1000;
         const cancellationRatioThreshold = 1 / 3;
 
-        const totals = {
-            D: 0,
-            F: 0,
-
-            get cancellationRatio() {
-                return this.F / (this.D + this.F);
-            },
-        };
-
-        const batch = [];
+        const batch = new Batch(timeRange, cancellationRatioThreshold);
 
         for (const trade of trades) {
-            while (batch.length > 0 && trade.timestamp.getTime() - batch[0].timestamp.getTime() > maxTimeDiff) {
-                const oldTrade = batch.shift();
-                totals[oldTrade.orderType] -= oldTrade.quantity;
-
-                if (totals.cancellationRatio > cancellationRatioThreshold) {
-                    return true;
-                }
+            while (batch.isOutsideTimeRange(trade)) {
+                batch.checkForExcessiveCancelling();
+                batch.removeOldest();
             }
 
-            totals[trade.orderType] += trade.quantity;
-            batch.push(trade);
+            batch.add(trade);
         }
 
-        return totals.cancellationRatio > cancellationRatioThreshold;
+        batch.checkForExcessiveCancelling();
+        return batch.checkFailed;
+    }
+}
+
+class Batch {
+    constructor(timeRange, cancellationRatioThreshold) {
+        this.timeRange = timeRange;
+        this.cancellationRatioThreshold = cancellationRatioThreshold;
+
+        this.trades = [];
+        this.total = {
+            D: 0,
+            F: 0,
+        };
+        this.checkFailed = false;
+    }
+
+    add(trade) {
+        this.total[trade.orderType] += trade.quantity;
+        this.trades.push(trade);
+    }
+
+    removeOldest() {
+        this.total[this.oldest.orderType] -= this.oldest.quantity;
+        this.trades.shift();
+    }
+
+    isOutsideTimeRange(trade) {
+        return this.oldest && trade.timestamp.getTime() - this.oldest.timestamp.getTime() > this.timeRange;
+    }
+
+    checkForExcessiveCancelling() {
+        this.checkFailed ||= this.cancellationRatio > this.cancellationRatioThreshold;
+    }
+
+    get oldest() {
+        return this.trades[0];
+    }
+
+    get totalCancelled() {
+        return this.total.F;
+    }
+
+    get totalNew() {
+        return this.total.D;
+    }
+
+    get cancellationRatio() {
+        return this.totalCancelled / (this.totalNew + this.totalCancelled);
     }
 }
 
