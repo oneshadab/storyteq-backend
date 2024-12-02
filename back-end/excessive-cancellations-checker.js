@@ -13,6 +13,7 @@ export class ExcessiveCancellationsChecker {
      */
     constructor(filePath) {
         this.filePath = filePath;
+        this.processors = new Map();
     }
 
     /**
@@ -22,15 +23,8 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<string[]>}
      */
     async companiesInvolvedInExcessiveCancellations() {
-        const trades = await this.getTrades();
-
-        const tradesByCompany = trades.reduce((groups, trade) => {
-            (groups[trade.company] ??= []).push(trade);
-            return groups;
-        }, {});
-
-        const companies = Object.keys(tradesByCompany);
-        return companies.filter((company) => this.hasExcessiveCancelling(tradesByCompany[company]));
+        await this.processTradeFile();
+        return this.excessiveCancelledCompanies;
     }
 
     /**
@@ -40,22 +34,45 @@ export class ExcessiveCancellationsChecker {
      * @returns {Promise<number>}
      */
     async totalNumberOfWellBehavedCompanies() {
-        const trades = await this.getTrades();
-        const uniqueCompanies = new Set(trades.map((trade) => trade.company));
-        const excessiveCompanies = await this.companiesInvolvedInExcessiveCancellations();
-
-        return uniqueCompanies.size - excessiveCompanies.length;
+        await this.processTradeFile();
+        return this.companies.length - this.excessiveCancelledCompanies.length;
     }
 
-    async getTrades() {
-        const trades = [];
-        for await (const trade of this.getTradeStream()) {
-            trades.push(trade);
+    reset() {
+        this.processors = new Map();
+    }
+
+    async processTradeFile() {
+        this.reset();
+
+        for await (const trade of this.readTrades()) {
+            this.process(trade);
         }
-        return trades;
     }
 
-    getTradeStream() {
+    /**
+     * @param {Trade} trade - The trade object to process.
+     */
+    process(trade) {
+        const timeRange = 60 * 1000;
+        const cancellationRatioThreshold = 1 / 3;
+
+        if (!this.processors.has(trade.company)) {
+            // Each company should have a single processor
+            this.processors.set(trade.company, new Processor(timeRange, cancellationRatioThreshold));
+        }
+
+        const processor = this.processors.get(trade.company);
+
+        while (processor.isOutsideTimeRange(trade)) {
+            processor.checkForExcessiveCancelling();
+            processor.removeOldest();
+        }
+
+        processor.add(trade);
+    }
+
+    readTrades() {
         const parser = new TradeParser(this.filePath);
         const lineStream = readline.createInterface({
             input: fs.createReadStream(this.filePath),
@@ -80,77 +97,21 @@ export class ExcessiveCancellationsChecker {
         return createStream();
     }
 
-    /**
-     * @returns {Promise<Object[]>}
-     */
-    async parseTradeFile() {
-        const trades = [];
-
-        const lineReader = readline.createInterface({
-            input: fs.createReadStream(this.filePath),
-            crlfDelay: Infinity,
-        });
-
-        for await (const line of lineReader) {
-            try {
-                const trade = this.parseTrade(line);
-                trades.push(trade);
-            } catch (error) {
-                console.error(`Error parsing trade ${line}`, error);
-            }
-        }
-
-        return trades;
+    get companies() {
+        return Array.from(this.processors.keys());
     }
 
-    /**
-     * @param {string} line
-     * @returns {Object}
-     */
-    parseTrade(line) {
-        const parts = line.split(',');
-        if (parts.length !== 4) {
-            throw new Error('Invalid line format');
-        }
-
-        const [timestamp, company, orderType, quantity] = parts;
-        if (orderType !== 'D' && orderType !== 'F') {
-            throw new Error('Invalid order type');
-        }
-
-        return new Trade(
-            new Date(timestamp),
-            company,
-            orderType,
-            parseInt(quantity)
-        );
-    }
-
-    /**
-     * @param {Trade[]} trades
-     * @returns {boolean}
-     */
-    hasExcessiveCancelling(trades) {
-        const timeRange = 60 * 1000;
-        const cancellationRatioThreshold = 1 / 3;
-
-        const batch = new Batch(timeRange, cancellationRatioThreshold);
-
-        for (const trade of trades) {
-            while (batch.isOutsideTimeRange(trade)) {
-                batch.checkForExcessiveCancelling();
-                batch.removeOldest();
-            }
-
-            batch.add(trade);
-        }
-
-        batch.checkForExcessiveCancelling();
-        return batch.checkFailed;
+    get excessiveCancelledCompanies() {
+        return this.companies.filter((company) => this.processors.get(company).checkForExcessiveCancelling());
     }
 }
 
-class Batch {
+/**
+ * Processor to hold the state while processing trades for a single company.
+ * 
+ * SIDE NOTE: Naming things is quite difficult
+ */
+class Processor {
     constructor(timeRange, cancellationRatioThreshold) {
         this.timeRange = timeRange;
         this.cancellationRatioThreshold = cancellationRatioThreshold;
@@ -178,7 +139,7 @@ class Batch {
     }
 
     checkForExcessiveCancelling() {
-        this.checkFailed ||= this.cancellationRatio > this.cancellationRatioThreshold;
+        return (this.checkFailed ||= this.cancellationRatio > this.cancellationRatioThreshold);
     }
 
     get oldest() {
@@ -197,4 +158,3 @@ class Batch {
         return this.totalCancelled / (this.totalNew + this.totalCancelled);
     }
 }
-
