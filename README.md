@@ -1,4 +1,4 @@
-# Excessive-Trade-Cancelling ![code coverage](https://img.shields.io/badge/code--coverage-95%25-brightgreen)
+# Excessive-Trade-Cancelling ![code coverage](https://img.shields.io/badge/code--coverage-100%25-brightgreen)
 
 Implementation of excessive trade cancelling checker.
 
