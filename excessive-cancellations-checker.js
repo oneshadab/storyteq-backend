@@ -87,7 +87,7 @@ export class ExcessiveCancellationsChecker {
      * @returns {AsyncIterable<Trade>}
      */
     readTrades() {
-        const parser = new TradeParser(this.filePath);
+        const parser = new TradeParser();
         const lineStream = readline.createInterface({
             input: fs.createReadStream(this.filePath),
             crlfDelay: Infinity,

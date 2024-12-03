@@ -4,13 +4,6 @@ export class ParseError extends Error {}
 
 export class TradeParser {
     /**
-     * @param {string} filePath
-     */
-    constructor(filePath) {
-        this.filePath = filePath;
-    }
-
-    /**
      * @param {string} line
      * @returns {Trade}
      */
@@ -21,10 +14,55 @@ export class TradeParser {
         }
 
         const [timestamp, company, orderType, quantity] = parts;
-        if (orderType !== 'D' && orderType !== 'F') {
+        return new Trade(
+            this.parseTimestamp(timestamp),
+            this.parseCompany(company),
+            this.parseOrderType(orderType),
+            this.parseQuantity(quantity)
+        );
+    }
+
+    /**
+     * @param {string} timestamp
+     * @returns {Date}
+     */
+    parseTimestamp(timestamp) {
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) {
+            throw new ParseError('Invalid timestamp');
+        }
+        return date;
+    }
+
+    /**
+     * @param {string} company
+     * @returns {string}
+     */
+    parseCompany(company) {
+        // TODO: Validate company format
+        return company;
+    }
+
+    /**
+     * @param {string} orderType
+     * @returns {string}
+     */
+    parseOrderType(orderType) {
+        if (!['D', 'F'].includes(orderType)) {
             throw new ParseError('Invalid order type');
         }
+        return orderType;
+    }
 
-        return new Trade(new Date(timestamp), company, orderType, parseInt(quantity));
+    /**
+     * @param {string} quantity
+     * @returns {number}
+     */
+    parseQuantity(quantity) {
+        const num = parseInt(quantity);
+        if (isNaN(num)) {
+            throw new ParseError('Invalid quantity');
+        }
+        return num;
     }
 }
